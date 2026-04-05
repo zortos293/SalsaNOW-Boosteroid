@@ -112,6 +112,20 @@ namespace SalsaNOW
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        public const uint SPI_SETDESKWALLPAPER = 0x0014;
+        public const uint SPIF_UPDATEINIFILE = 0x01;
+        public const uint SPIF_SENDCHANGE = 0x02;
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, string pvParam, uint fWinIni);
+
+        public static bool SetDesktopWallpaper(string fullPath)
+        {
+            if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
+                return false;
+            return SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, Path.GetFullPath(fullPath), SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+        }
+
         // --- kernel32.dll ---
 
         [DllImport("kernel32.dll")]

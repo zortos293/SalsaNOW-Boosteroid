@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace SalsaNOW
 {
@@ -239,6 +241,32 @@ namespace SalsaNOW
 
                 if (token.IsCancellationRequested) return;
 
+                try
+                {
+                    const string explorerAdvanced = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+                    using (var adv = Registry.CurrentUser.CreateSubKey(explorerAdvanced, true))
+                    {
+                        if (adv != null)
+                        {
+                            adv.SetValue("TaskbarAutoHide", 0, RegistryValueKind.DWord);
+                            adv.SetValue("TaskbarAutoHideInTabletMode", 0, RegistryValueKind.DWord);
+                        }
+                    }
+
+                    // StuckRects* Settings blob: offset 8 (9th byte) often ties to auto-hide; values differ by Windows build (0x02 / 0x03 / 0x22).
+                    byte hideOffByte = GetStuckRectsAlwaysShowByte();
+                    TryPatchStuckRectsSettings(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3", hideOffByte);
+                    TryPatchStuckRectsSettings(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects2", hideOffByte);
+
+                    SalsaLogger.Info($"Taskbar: Advanced DWORDs + StuckRects Settings[8]=0x{hideOffByte:X2} (Explorer restart applies).");
+                }
+                catch (Exception ex)
+                {
+                    SalsaLogger.Error($"Failed to apply taskbar visibility registry: {ex.Message}");
+                }
+
+                if (token.IsCancellationRequested) return;
+
                 string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                 string explorerPath = Path.Combine(winDir, "explorer.exe");
                 if (!File.Exists(explorerPath))
@@ -271,7 +299,75 @@ namespace SalsaNOW
                     SalsaLogger.Info("Restarted explorer.exe.");
                 }
                 catch (Exception ex) { SalsaLogger.Error($"Failed to restart explorer.exe: {ex.Message}"); }
+
+                if (token.IsCancellationRequested) return;
+
+                Thread.Sleep(2000);
+
+                if (token.IsCancellationRequested) return;
+
+                try
+                {
+                    const string wallpaperUrl = "https://salsanowfiles.work/Boosteroid/boosteroid_wp.png";
+                    string localWallpaper = Path.Combine(Path.GetTempPath(), "salsanow_boosteroid_wp.png");
+                    using (var wc = new WebClient())
+                    {
+                        wc.DownloadFile(wallpaperUrl, localWallpaper);
+                    }
+                    if (NativeMethods.SetDesktopWallpaper(localWallpaper))
+                        SalsaLogger.Info("Desktop wallpaper set (Boosteroid).");
+                    else
+                        SalsaLogger.Warn("Desktop wallpaper API returned false.");
+                }
+                catch (Exception ex)
+                {
+                    SalsaLogger.Error($"Failed to set desktop wallpaper: {ex.Message}");
+                }
             }, token);
+        }
+
+        static bool TryGetWindowsBuildNumber(out int build)
+        {
+            build = 0;
+            try
+            {
+                using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                {
+                    if (k == null) return false;
+                    object v = k.GetValue("CurrentBuild");
+                    if (v is int i) { build = i; return true; }
+                    if (v is string s && int.TryParse(s, out int b)) { build = b; return true; }
+                    v = k.GetValue("CurrentBuildNumber");
+                    if (v is string s2 && int.TryParse(s2, out int b2)) { build = b2; return true; }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        static byte GetStuckRectsAlwaysShowByte()
+        {
+            // Offset 8 in Settings is widely cited but values conflict (0x02 vs 0x03 vs 0x22). We avoid 0x03 (reported ineffective here).
+            if (TryGetWindowsBuildNumber(out int build) && build >= 22000)
+                return 0x22;
+            return 0x02;
+        }
+
+        static void TryPatchStuckRectsSettings(string explorerSubKey, byte byteAtOffset8)
+        {
+            try
+            {
+                using (var stuck = Registry.CurrentUser.OpenSubKey(explorerSubKey, true))
+                {
+                    if (stuck == null) return;
+                    var settings = stuck.GetValue("Settings") as byte[];
+                    if (settings == null || settings.Length <= 8) return;
+                    byte[] copy = (byte[])settings.Clone();
+                    copy[8] = byteAtOffset8;
+                    stuck.SetValue("Settings", copy, RegistryValueKind.Binary);
+                }
+            }
+            catch { }
         }
 
     }

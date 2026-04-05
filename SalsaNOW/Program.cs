@@ -48,7 +48,7 @@ namespace SalsaNOW
 
             // Execute deployment modules
             await AppInstaller.AppsInstallAsync(globalDirectory, customAppsJsonPath);
-            await AppInstaller.DesktopInstallAsync(globalDirectory);
+            //await AppInstaller.DesktopInstallAsync(globalDirectory);
             //await AppInstaller.AppsInstallSilentAsync(globalDirectory);
             
             //await SteamManager.ShutdownServerAsync(globalDirectory);
